@@ -192,6 +192,12 @@
   ;(pretty-print (state (state-S st) (state-C st) (cdr (state-D st))))
   (state (state-S st) (state-C st) (cdr (state-D st))))
 
+(define (state-next-conjunct st)
+  (car (state-D st)))
+
+(define (state-consume-conjunct st)
+  ((state-next-conjunct st) (state-less-conjunct st)))
+
 (define state-with-scope
   (lambda (st new-scope)
     (state (subst-with-scope (state-S st) new-scope) (state-C st) (state-D st))))
@@ -304,12 +310,20 @@
     (() #f) ; failed stream
     ((f) (lambda () (bind (f) g))) ; suspended stream
     ((c) (g (state-with-delayed-conjunct c 1))) ; single package
-    ((c f) (mplus (g c) (lambda () (bind (f) g)))))) ; package + suspended stream
+    ((c f) (mplus (g (state-with-delayed-conjunct c 1)) (lambda () (bind (f) g)))))) ; package + suspended stream
 
 ; (suspend e:SearchStream) -> SuspendedStream
 ; Used to clearly mark the locations where search is suspended in order to
 ; interleave with other branches.
 (define-syntax suspend (syntax-rules () ((_ body) (lambda () body))))
+
+; SearchStream, Goal -> SearchStream
+(define (fair-bind stream g)
+  (case-inf stream
+    (() #f) ; failed stream
+    ((f) (lambda () (fair-bind (f) g))) ; suspended stream
+    ((c) (suspend (state-with-delayed-conjunct c g))) ; single package
+    ((c f) (mplus (suspend (state-with-delayed-conjunct c g)) (lambda () (fair-bind (f) g)))))) ; package + suspended stream
 
 ; Int, SuspendedStream -> (ListOf SearchResult)
 (define (take n f)
@@ -318,7 +332,7 @@
     (case-inf (f)
       (() '())
       ((f) (take n f))
-      ((c) (if (equal? '() (state-D c)) (begin (printf "done removing conj\n") (cons c '())) (take n (suspend (state-less-conjunct c)))))
+      ((c) (if (equal? '() (state-D c)) (begin (printf "done removing conj\n") (cons c '())) (take n (suspend (state-consume-conjunct c)))))
       ((c f) (cons c (take (and n (- n 1)) f))))))
 
        
@@ -328,6 +342,12 @@
   (syntax-rules ()
     ((_ e) e)
     ((_ e g0 g ...) (bind* (bind e g0) g ...))))
+
+; (bind* e:SearchStream g:Goal ...) -> SearchStream
+(define-syntax fair-bind*
+  (syntax-rules ()
+    ((_ e) e)
+    ((_ e g0 g ...) (fair-bind* (fair-bind e g0) g ...))))
 
 ; (mplus* e:SearchStream ...+) -> SearchStream
 (define-syntax mplus*
@@ -345,6 +365,16 @@
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
              (bind* st g0 g ...))))))))
+
+; (fresh (x:id ...) g:Goal ...+) -> Goal
+(define-syntax fair-fresh
+  (syntax-rules ()
+    ((_ (x ...) g0 g ...)
+     (lambda (st)
+       (suspend
+         (let ((scope (subst-scope (state-S st))))
+           (let ((x (var scope)) ...)
+             (fair-bind* st g0 g ...))))))))
 
 ; (conde [g:Goal ...] ...+) -> Goal
 (define-syntax conde
@@ -371,6 +401,23 @@
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
        (fresh (q0 q1 q ...)
+         g0 g ...
+         (== (list q0 q1 q ...) x))))))
+
+(define-syntax fair-run
+  (syntax-rules ()
+    ((_ n (q) g0 g ...)
+     (take n
+           (suspend
+             ((fair-fresh (q) g0 g ...
+                     (lambda (st)
+                       (let ((st (state-with-scope st nonlocal-scope)))
+                         (let ((z ((reify q) st)))
+                           (cons z (lambda () (lambda () #f)))))))
+              empty-state))))
+    ((_ n (q0 q1 q ...) g0 g ...)
+     (run n (x)
+       (fair-fresh (q0 q1 q ...)
          g0 g ...
          (== (list q0 q1 q ...) x))))))
 
