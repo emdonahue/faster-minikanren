@@ -305,7 +305,7 @@
     ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
 ; SearchStream, Goal -> SearchStream
-(define (bind stream g)
+(define (bind2 stream g)
   (case-inf stream
     (() #f) ; failed stream
     ((f) (lambda () (bind (f) g))) ; suspended stream
@@ -318,7 +318,7 @@
 (define-syntax suspend (syntax-rules () ((_ body) (lambda () body))))
 
 ; SearchStream, Goal -> SearchStream
-(define (fair-bind stream g)
+(define (bind stream g)
   (case-inf stream
     (() #f) ; failed stream
     ((f) (lambda () (fair-bind (f) g))) ; suspended stream
