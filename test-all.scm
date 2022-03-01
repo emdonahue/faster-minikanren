@@ -1,5 +1,8 @@
 (load "test-check.scm")
 
+(printf "fairness-tests\n")
+(load "fairness-tests.scm")
+
 (printf "==-tests\n")
 (load "==-tests.scm")
 

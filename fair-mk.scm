@@ -182,6 +182,16 @@
 (define (state-with-C st C^)
   (state (state-S st) C^ (state-D st)))
 
+(define (state-with-delayed-conjunct st d)
+  ;(printf "adding conjunct\n")
+  (state (state-S st) (state-C st) (append (state-D st) (list d))))
+
+(define (state-less-conjunct st)
+  ;(printf "state-less-conjunct\n")
+  ;(pretty-print st)
+  ;(pretty-print (state (state-S st) (state-C st) (cdr (state-D st))))
+  (state (state-S st) (state-C st) (cdr (state-D st))))
+
 (define state-with-scope
   (lambda (st new-scope)
     (state (subst-with-scope (state-S st) new-scope) (state-C st) (state-D st))))
@@ -269,7 +279,7 @@
     ((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
      (let ((stream e))
        (cond
-         ((not stream) e0)
+         ((not stream) e0) ;failure case
          ((procedure? stream)  (let ((f^ stream)) e1))
          ((not (and (pair? stream)
                  (procedure? (cdr stream))))
@@ -291,10 +301,15 @@
 ; SearchStream, Goal -> SearchStream
 (define (bind stream g)
   (case-inf stream
-    (() #f)
-    ((f) (lambda () (bind (f) g)))
-    ((c) (g c))
-    ((c f) (mplus (g c) (lambda () (bind (f) g))))))
+    (() #f) ; failed stream
+    ((f) (lambda () (bind (f) g))) ; suspended stream
+    ((c) (g (state-with-delayed-conjunct c 1))) ; single package
+    ((c f) (mplus (g c) (lambda () (bind (f) g)))))) ; package + suspended stream
+
+; (suspend e:SearchStream) -> SuspendedStream
+; Used to clearly mark the locations where search is suspended in order to
+; interleave with other branches.
+(define-syntax suspend (syntax-rules () ((_ body) (lambda () body))))
 
 ; Int, SuspendedStream -> (ListOf SearchResult)
 (define (take n f)
@@ -303,19 +318,16 @@
     (case-inf (f)
       (() '())
       ((f) (take n f))
-      ((c) (cons c '()))
+      ((c) (if (equal? '() (state-D c)) (begin (printf "done removing conj\n") (cons c '())) (take n (suspend (state-less-conjunct c)))))
       ((c f) (cons c (take (and n (- n 1)) f))))))
+
+       
 
 ; (bind* e:SearchStream g:Goal ...) -> SearchStream
 (define-syntax bind*
   (syntax-rules ()
     ((_ e) e)
     ((_ e g0 g ...) (bind* (bind e g0) g ...))))
-
-; (suspend e:SearchStream) -> SuspendedStream
-; Used to clearly mark the locations where search is suspended in order to
-; interleave with other branches.
-(define-syntax suspend (syntax-rules () ((_ body) (lambda () body))))
 
 ; (mplus* e:SearchStream ...+) -> SearchStream
 (define-syntax mplus*
@@ -332,7 +344,7 @@
        (suspend
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
-             (bind* (g0 st) g ...))))))))
+             (bind* st g0 g ...))))))))
 
 ; (conde [g:Goal ...] ...+) -> Goal
 (define-syntax conde
@@ -342,8 +354,8 @@
        (suspend
          (let ((st (state-with-scope st (new-scope))))
            (mplus*
-             (bind* (g0 st) g ...)
-             (bind* (g1 st) g^ ...) ...)))))))
+             (bind* st g0 g ...)
+             (bind* st g1 g^ ...) ...)))))))
 
 (define-syntax run
   (syntax-rules ()
