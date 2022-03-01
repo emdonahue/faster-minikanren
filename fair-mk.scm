@@ -171,20 +171,20 @@
 ;   C - the constraint store
 ;   D - the delayed conjuncts
 
-(define (state S C ) (list S C 1))
+(define (state S C D) (list S C D))
 
 (define (state-S st) (car st))
 (define (state-C st) (cadr st))
 (define (state-D st) (caddr st))
 
-(define empty-state (state empty-subst empty-C ))
+(define empty-state (state empty-subst empty-C '()))
 
 (define (state-with-C st C^)
-  (state (state-S st) C^))
+  (state (state-S st) C^ (state-D st)))
 
 (define state-with-scope
   (lambda (st new-scope)
-    (state (subst-with-scope (state-S st) new-scope) (state-C st))))
+    (state (subst-with-scope (state-S st) new-scope) (state-C st) (state-D st))))
 
 ; Unification
 
@@ -495,7 +495,7 @@
   (lambda (st)
     (let-values (((S^ added) (unify u v (state-S st))))
       (if S^
-        (and-foldl update-constraints (state S^ (state-C st)) added)
+        (and-foldl update-constraints (state S^ (state-C st) (state-D st)) added)
         #f))))
 
 ; Not fully optimized. Could do absento update with fewer
