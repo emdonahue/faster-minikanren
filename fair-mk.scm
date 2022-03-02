@@ -1,5 +1,13 @@
 (define always-wrap-reified? (make-parameter #f))
 
+(define always-fair #f) ; Hack debugging tool to convert all fresh to fair-fresh to reuse old tests.
+(define logging #t) ; Hack logging
+;(define (log msg) (if logging (pretty-print msg) #f))
+(define-syntax log
+  (syntax-rules ()
+    ((_ m ...)
+    (begin (if logging (pretty-print m) #f) ...))))
+
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
 ; creation and unification to allow the set-var-val! optimization
@@ -175,30 +183,36 @@
 
 (define (state-S st) (car st))
 (define (state-C st) (cadr st))
-(define (state-D st) (caddr st))
+(trace-define (state-D st) (caddr st))
+
+(define empty-conjs '())
 
 (define empty-state (state empty-subst empty-C '()))
 
-(define (state-with-C st C^)
+(trace-define (state-with-C st C^)
   (state (state-S st) C^ (state-D st)))
 
-(define (state-with-delayed-conjunct st d)
+(trace-define (state-with-delayed-conjunct st d)
   ;(printf "adding conjunct\n")
   (state (state-S st) (state-C st) (append (state-D st) (list d))))
 
-(define (state-less-conjunct st)
+(trace-define (state-less-conjunct st)
   ;(printf "state-less-conjunct\n")
   ;(pretty-print st)
   ;(pretty-print (state (state-S st) (state-C st) (cdr (state-D st))))
   (state (state-S st) (state-C st) (cdr (state-D st))))
 
-(define (state-next-conjunct st)
+(trace-define (state-no-conjuncts st)
+  (or (equal? st #f) (equal? '() (state-D st))))
+
+
+(trace-define (state-next-conjunct st)
   (car (state-D st)))
 
-(define (state-consume-conjunct st)
+(trace-define (state-consume-conjunct st)
   ((state-next-conjunct st) (state-less-conjunct st)))
 
-(define state-with-scope
+(trace-define state-with-scope
   (lambda (st new-scope)
     (state (subst-with-scope (state-S st) new-scope) (state-C st) (state-D st))))
 
@@ -285,10 +299,10 @@
     ((_ e (() e0) ((f^) e1) ((c^) e2) ((c f) e3))
      (let ((stream e))
        (cond
-         ((not stream) e0) ;failure case
-         ((procedure? stream)  (let ((f^ stream)) e1))
+         ((not stream) e0) 
+         ((procedure? stream)  (let ((f^ stream)) e1)) 
          ((not (and (pair? stream)
-                 (procedure? (cdr stream))))
+                 (procedure? (cdr stream)))) 
           (let ((c^ stream)) e2))
          (else (let ((c (car stream)) (f (cdr stream)))
                  e3)))))))
@@ -309,8 +323,8 @@
   (case-inf stream
     (() #f) ; failed stream
     ((f) (lambda () (bind (f) g))) ; suspended stream
-    ((c) (g c)) ; single package
-    ((c f) (mplus (g c) (lambda () (bind (f) g)))))) ; package + suspended stream
+    ((c) (log "bind-single" (log c (g c)))) ; single package
+    ((c f) (log "bind-multi" (log c (mplus (g c) (lambda () (bind (f) g)))))))) ; package + suspended stream
 
 ; (suspend e:SearchStream) -> SuspendedStream
 ; Used to clearly mark the locations where search is suspended in order to
@@ -326,14 +340,20 @@
     ((c f) (mplus (suspend (state-with-delayed-conjunct c g)) (lambda () (fair-bind (f) g)))))) ; package + suspended stream
 
 ; Int, SuspendedStream -> (ListOf SearchResult)
-(define (take n f)
+(trace-define (take n f)
   (if (and n (zero? n))
     '()
     (case-inf (f)
       (() '())
       ((f) (take n f))
-      ((c) (if (equal? '() (state-D c)) (begin (printf "done removing conj\n") (cons c '())) (take n (suspend (state-consume-conjunct c)))))
-      ((c f) (cons c (take (and n (- n 1)) f))))))
+      ((c) (log "take-single" (log c
+				   (if (state-no-conjuncts c)
+	       (begin (printf "done removing conj\n") (cons c '()))
+	       (take n (suspend (state-consume-conjunct c)))))))
+      ((c f) (log "take-multi" (log c
+				    (if (state-no-conjuncts c)
+		 (cons c (take (and n (- n 1)) f))
+		 (take n (suspend (cons (state-consume-conjunct c) f))))))))))
 
        
 
@@ -360,11 +380,13 @@
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
+     (if always-fair
+	 (fair-fresh (x ...) g0 g ...)
      (lambda (st)
        (suspend
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
-             (bind* st g0 g ...))))))))
+             (bind* st g0 g ...)))))))))
 
 ; (fresh (x:id ...) g:Goal ...+) -> Goal
 (define-syntax fair-fresh
@@ -372,16 +394,21 @@
     ((_ (x ...) g0 g ...)
      (lambda (st)
        (suspend
-       (state-with-delayed-conjunct
+	(log "delaying fresh"
+	     (log st
+	(state-with-delayed-conjunct
 	st
 	(lambda (st)
+	  (begin
+	    (log "undelayed fresh")
+	    (log st)
 	  (suspend
 	   (let ((scope (subst-scope (state-S st))))
 	     (let ((x (var scope)) ...)
-	       (bind* st g0 g ...)))))))))))
+	       (bind* st g0 g ...))))))))))))))
 
 ; (conde [g:Goal ...] ...+) -> Goal
-(define-syntax conde
+(trace-define-syntax conde
   (syntax-rules ()
     ((_ (g0 g ...) (g1 g^ ...) ...)
      (lambda (st)
@@ -391,7 +418,7 @@
              (bind* st g0 g ...)
              (bind* st g1 g^ ...) ...)))))))
 
-(define-syntax run
+(trace-define-syntax run
   (syntax-rules ()
     ((_ n (q) g0 g ...)
      (take n
@@ -405,23 +432,6 @@
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
        (fresh (q0 q1 q ...)
-         g0 g ...
-         (== (list q0 q1 q ...) x))))))
-
-(define-syntax fair-run
-  (syntax-rules ()
-    ((_ n (q) g0 g ...)
-     (take n
-           (suspend
-             ((fair-fresh (q) g0 g ...
-                     (lambda (st)
-                       (let ((st (state-with-scope st nonlocal-scope)))
-                         (let ((z ((reify q) st)))
-                           (cons z (lambda () (lambda () #f)))))))
-              empty-state))))
-    ((_ n (q0 q1 q ...) g0 g ...)
-     (run n (x)
-       (fair-fresh (q0 q1 q ...)
          g0 g ...
          (== (list q0 q1 q ...) x))))))
 
@@ -554,7 +564,7 @@
     (let ((res (proc (car lst) init)))
       (and res (and-foldl proc res (cdr lst))))))
 
-(define (== u v)
+(trace-define (== u v)
   (lambda (st)
     (let-values (((S^ added) (unify u v (state-S st))))
       (if S^
