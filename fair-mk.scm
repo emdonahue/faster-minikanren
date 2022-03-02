@@ -305,12 +305,12 @@
     ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
 ; SearchStream, Goal -> SearchStream
-(define (bind2 stream g)
+(define (bind stream g)
   (case-inf stream
     (() #f) ; failed stream
     ((f) (lambda () (bind (f) g))) ; suspended stream
-    ((c) (g (state-with-delayed-conjunct c 1))) ; single package
-    ((c f) (mplus (g (state-with-delayed-conjunct c 1)) (lambda () (bind (f) g)))))) ; package + suspended stream
+    ((c) (g c)) ; single package
+    ((c f) (mplus (g c) (lambda () (bind (f) g)))))) ; package + suspended stream
 
 ; (suspend e:SearchStream) -> SuspendedStream
 ; Used to clearly mark the locations where search is suspended in order to
@@ -318,7 +318,7 @@
 (define-syntax suspend (syntax-rules () ((_ body) (lambda () body))))
 
 ; SearchStream, Goal -> SearchStream
-(define (bind stream g)
+(define (fair-bind stream g)
   (case-inf stream
     (() #f) ; failed stream
     ((f) (lambda () (fair-bind (f) g))) ; suspended stream
@@ -372,9 +372,13 @@
     ((_ (x ...) g0 g ...)
      (lambda (st)
        (suspend
-         (let ((scope (subst-scope (state-S st))))
-           (let ((x (var scope)) ...)
-             (fair-bind* st g0 g ...))))))))
+       (state-with-delayed-conjunct
+	st
+	(lambda (st)
+	  (suspend
+	   (let ((scope (subst-scope (state-S st))))
+	     (let ((x (var scope)) ...)
+	       (bind* st g0 g ...)))))))))))
 
 ; (conde [g:Goal ...] ...+) -> Goal
 (define-syntax conde
