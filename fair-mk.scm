@@ -1,4 +1,6 @@
 (define always-wrap-reified? (make-parameter #f))
+(define (pp msg)
+  (pretty-print msg))
 
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
@@ -306,22 +308,22 @@
     ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
 ; SearchStream, Goal -> SearchStream
-(define (bind stream g)
+(trace-define (bind stream g)
   (case-inf stream
-    (() #f)
-    ((f) (lambda () (bind (f) g)))
-    ((c) (g c))
-    ((c f) (mplus (g c) (lambda () (bind (f) g))))))
+    (() (begin (printf "binding #f\n") #f))
+    ((f) (begin (printf "binding suspended stream\n") (lambda () (bind (f) g))))
+    ((c) (begin (printf "binding singleton\n") (g c)))
+    ((c f) (begin (printf "binding multi stream\n") (mplus (g c) (lambda () (bind (f) g)))))))
 
 ; Int, SuspendedStream -> (ListOf SearchResult)
-(define (take n f)
+(trace-define (take n f)
   (if (and n (zero? n))
     '()
     (case-inf (f)
-      (() '())
-      ((f) (take n f))
-      ((c) (cons c '()))
-      ((c f) (cons c (take (and n (- n 1)) f))))))
+      (() (begin (printf "taking empty stream\n") '()))
+      ((f) (begin (printf "taking suspended stream\n") (take n f)))
+      ((c) (begin (printf "taking singleton stream\n") (pretty-print c) (cons c '())))
+      ((c f) (begin (printf "taking answer stream\n") (pretty-print c) (cons c (take (and n (- n 1)) f)))))))
 
 ; (bind* e:SearchStream g:Goal ...) -> SearchStream
 (define-syntax bind*
@@ -352,7 +354,7 @@
              (bind* (g0 st) g ...))))))))
 
 ; (fresh (x:id ...) g:Goal ...+) -> Goal
-(trace-define-syntax fair-fresh
+(define-syntax fair-fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
      (lambda (st)
@@ -381,7 +383,7 @@
      (take n
            (suspend
              ((fresh (q) g0 g ...
-                     (lambda (st)
+                     (trace-lambda reifier (st) ;must always be actual state obj in final goal or bind fails before
                        (let ((st (state-with-scope st nonlocal-scope)))
                          (let ((z ((reify q) st)))
                            (cons z (lambda () (lambda () #f)))))))
