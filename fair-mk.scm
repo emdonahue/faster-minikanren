@@ -316,6 +316,13 @@
     ((c) (begin (printf "binding singleton\n") (g c)))
     ((c f) (begin (printf "binding multi stream\n") (mplus (g c) (lambda () (bind (f) g)))))))
 
+(trace-define (bind-conj st)
+	      (if (state-no-conjuncts st)
+		  st
+		  (bind ((state-next-conjunct st) (state-less-conjunct st)) bind-conj)
+		  ))
+		     
+
 ; Int, SuspendedStream -> (ListOf SearchResult)
 (trace-define (take n f)
   (if (and n (zero? n))
@@ -396,7 +403,8 @@
      (take n
            (suspend
 	    ((eager-fresh (q) g0 g ...
-		    (trace-lambda
+			  bind-conj
+		    #;(trace-lambda
 		     conj-trampoline (st) ;must always be actual state obj in final goal or bind fails
 		     (if (state-no-conjuncts st)
 			 st
@@ -544,7 +552,7 @@
       (and res (and-foldl proc res (cdr lst))))))
 
 (define (== u v)
-  (lambda (st)
+  (trace-lambda unifier (st)
     (let-values (((S^ added) (unify u v (state-S st))))
       (if S^
         (and-foldl update-constraints (state S^ (state-C st) (state-D st)) added)
