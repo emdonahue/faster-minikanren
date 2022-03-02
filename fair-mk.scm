@@ -351,7 +351,7 @@
        (suspend
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
-             (bind* (g0 st) g ...))))))))
+             (bind* st g0 g ...))))))))
 
 ; (fresh (x:id ...) g:Goal ...+) -> Goal
 (define-syntax fair-fresh
@@ -364,7 +364,7 @@
        (suspend
          (let ((scope (subst-scope (state-S st))))
            (let ((x (var scope)) ...)
-             (bind* (g0 st) g ...))))))))))
+             (bind* st g0 g ...))))))))))
 
 ; (conde [g:Goal ...] ...+) -> Goal
 (define-syntax conde
@@ -374,16 +374,23 @@
        (suspend
          (let ((st (state-with-scope st (new-scope))))
            (mplus*
-             (bind* (g0 st) g ...)
-             (bind* (g1 st) g^ ...) ...)))))))
+             (bind* st g0 g ...)
+             (bind* st g1 g^ ...) ...)))))))
 
 (define-syntax run
   (syntax-rules ()
     ((_ n (q) g0 g ...)
      (take n
            (suspend
-             ((fresh (q) g0 g ...
-                     (trace-lambda reifier (st) ;must always be actual state obj in final goal or bind fails before
+	    ((fresh (q) g0 g ...
+		    (trace-lambda
+		     conj-trampoline (st) ;must always be actual state obj in final goal or bind fails
+		     (if (state-no-conjuncts st)
+			 st
+			 ((state-next-conjunct st) (state-less-conjunct st))
+			 )
+		     )
+                     (trace-lambda reifier (st) 
                        (let ((st (state-with-scope st nonlocal-scope)))
                          (let ((z ((reify q) st)))
                            (cons z (lambda () (lambda () #f)))))))
