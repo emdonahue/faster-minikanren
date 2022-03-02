@@ -1,6 +1,7 @@
 (define always-wrap-reified? (make-parameter #f))
 (define (pp msg)
   (pretty-print msg))
+(define always-fresh #t)
 
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
@@ -175,7 +176,7 @@
 (define (state S C D) (list S C D))
 
 (define (state-S st) (car st))
-(define (state-C st) (cdr st))
+(define (state-C st) (cadr st))
 (trace-define (state-D st) (caddr st))
 
 (trace-define (state-with-C st C^)
@@ -347,11 +348,23 @@
 (define-syntax fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
+     (if always-fresh
+	 (fair-fresh (x ...) g0 g ...)
+	 (lambda (st)
+	   (suspend
+	    (let ((scope (subst-scope (state-S st))))
+	      (let ((x (var scope)) ...)
+		(bind* st g0 g ...)))))))))
+
+; (fresh (x:id ...) g:Goal ...+) -> Goal
+(define-syntax eager-fresh
+  (syntax-rules ()
+    ((_ (x ...) g0 g ...)
      (lambda (st)
        (suspend
-         (let ((scope (subst-scope (state-S st))))
-           (let ((x (var scope)) ...)
-             (bind* st g0 g ...))))))))
+	(let ((scope (subst-scope (state-S st))))
+	  (let ((x (var scope)) ...)
+	    (bind* st g0 g ...))))))))
 
 ; (fresh (x:id ...) g:Goal ...+) -> Goal
 (define-syntax fair-fresh
@@ -382,7 +395,7 @@
     ((_ n (q) g0 g ...)
      (take n
            (suspend
-	    ((fresh (q) g0 g ...
+	    ((eager-fresh (q) g0 g ...
 		    (trace-lambda
 		     conj-trampoline (st) ;must always be actual state obj in final goal or bind fails
 		     (if (state-no-conjuncts st)
@@ -397,7 +410,7 @@
               empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
-       (fresh (q0 q1 q ...)
+       (eager-fresh (q0 q1 q ...)
          g0 g ...
          (== (list q0 q1 q ...) x))))))
 
