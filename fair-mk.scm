@@ -1,3 +1,12 @@
+; Fair conjunction implementation
+
+; The only meaningful changes are in fresh (which has been re-added as fair-fresh to leave the classic fresh unchanged) and run.
+; Fresh goals, on first execution, push themselves into a queue in the state and return, taking no other action
+; Later, in run, just before a state is about to be passed to the reifier goal at the end of fresh, there is a second, penultimate goal that checks whether the state contains unexecuted freshes and if so removes them and runs them like normal, merging the stream into the global stream via the implicit logic of bind
+; This results in fresh goals waiting until all their sibling conjuncts have run before executing, and any subgoals they may have execute after any sibling fair fresh goal they may have had, thereby ensuring that all conjuncts are eventually visited even in the presence of recursion that would otherwise cause divergence. That's pretty much the entire implementation. It's ~5 lines plus some utility functions
+
+; To test fresh goals, toggle the always-fresh flag that turns all freshes into fair-freshes so that the old tests can be run as-is. This is a hack, but it will do the trick. Preliminary results suggest that fair freshes pass all the basic tests but are extremely slow on interpreters running backwards, which accords with my findings in the SmallTalk implementation. One area for possibly reclaiming some performance or at least some programmer flexibility (aside from the fact that you can use fair and normal fresh as much as you want in the program, so you are not giving up the ability to write eager fresh) might come from playing with the datastructure that contains the delayed conjuncts. I use a queue, because it guarantees completeness. A list might diverge, and something in between, perhaps some kind of mini miniKanren interleaving tree, could potentially have other properties that might even recover some of the bias of the eager fresh where it counts, although I haven't thought this through enough to know if that's a real possibility.
+
 (define always-wrap-reified? (make-parameter #f))
 (define always-fresh #f) ; Hacky debugging variable to re-use existing tests but make all the freshes fair. #t makes all freshes fair, #f makes them wh
 
@@ -170,6 +179,7 @@
 ; Contains:
 ;   S - the substitution
 ;   C - the constraint store
+;   D - the queue of delayed conjunctions
 
 (define (state S C D) (list S C D))
 
@@ -180,20 +190,25 @@
 (define (state-with-C st C^)
   (state (state-S st) C^ (state-D st)))
 
-(define (state-with-delayed-conjunct st d)
+; Push a fair/lazy goal into the state's queue for execution after its sibling conjuncts
+(define (state-add-conjunct st d)
   (state (state-S st) (state-C st) (append (state-D st) (list d))))
 
-(define (state-less-conjunct st)
-  (state (state-S st) (state-C st) (cdr (state-D st))))
-
-(define (state-no-conjuncts st)
-  (or (equal? st #f) (equal? '() (state-D st))))
-
-(define (state-next-conjunct st)
+; Return the first conjunct in the queue
+(define (state-first-conjunct st)
   (car (state-D st)))
 
-(define (state-consume-conjunct st)
-  ((state-next-conjunct st) (state-less-conjunct st)))
+; Remove the first conjunct and return the state with the remaining conjuncts
+(define (state-remove-conjunct st)
+  (state (state-S st) (state-C st) (cdr (state-D st))))
+
+; Test whether the state has remaining conjuncts waiting to be run
+(define (state-has-conjuncts st)
+  (not (equal? '() (state-D st))))
+
+; Remove the first conjunct and execute it in the current state, returning the resulting stream
+(define (state-run-conjunct st)
+  ((state-first-conjunct st) (state-remove-conjunct st)))
 
 (define empty-state (state empty-subst empty-C '()))
 
@@ -314,13 +329,6 @@
     ((c) (g c))
     ((c f) (mplus (g c) (lambda () (bind (f) g))))))
 
-(define (bind-conj st)
-	      (if (state-no-conjuncts st)
-		  st
-		  (bind ((state-next-conjunct st) (state-less-conjunct st)) bind-conj)
-		  ))
-		     
-
 ; Int, SuspendedStream -> (ListOf SearchResult)
 (define (take n f)
   (if (and n (zero? n))
@@ -361,6 +369,7 @@
 	      (let ((x (var scope)) ...)
 		(bind* st g0 g ...)))))))))
 
+; Only exists so that run can call normal fresh even when the debug hack always-fresh is on. This doesn't otherwise need to exist, you can have just fresh and fair-fresh
 ; (fresh (x:id ...) g:Goal ...+) -> Goal
 (define-syntax eager-fresh
   (syntax-rules ()
@@ -372,17 +381,18 @@
 	    (bind* st g0 g ...))))))))
 
 ; (fresh (x:id ...) g:Goal ...+) -> Goal
+; fair-fresh simply adds itself to the state on first call, and subsequently behaves like a normal fresh when pulled out of the queue and run
 (define-syntax fair-fresh
   (syntax-rules ()
     ((_ (x ...) g0 g ...)
-     (lambda (st)
-       (state-with-delayed-conjunct
-	st
-	(lambda (st)
-       (suspend
-         (let ((scope (subst-scope (state-S st))))
-           (let ((x (var scope)) ...)
-             (bind* st g0 g ...))))))))))
+     (lambda (st) ; Return a fake goal
+       (state-add-conjunct ; that stuffs into
+	st ; the current state 
+	(lambda (st) ; the entire classic fresh (below) and returns the state
+	  (suspend
+	   (let ((scope (subst-scope (state-S st))))
+	     (let ((x (var scope)) ...)
+	       (bind* st g0 g ...))))))))))
 
 ; (conde [g:Goal ...] ...+) -> Goal
 (define-syntax conde
@@ -395,24 +405,23 @@
              (bind* st g0 g ...)
              (bind* st g1 g^ ...) ...)))))))
 
+; Special goal used by run right before final reifier goal to recursively run all delayed goals in a given state before passing the stream to the reifier. Might be more elegantly handled by differentiating between states with and without delayed goals in case-inf or something, but this works in a pinch.
+(define (bind-conj st)
+  (if (state-has-conjuncts st)      
+      (bind (state-run-conjunct st) bind-conj)
+      st))
+
 (define-syntax run
   (syntax-rules ()
     ((_ n (q) g0 g ...)
      (take n
            (suspend
 	    ((eager-fresh (q) g0 g ...
-			  bind-conj
-		    #;(trace-lambda
-		     conj-trampoline (st) ;must always be actual state obj in final goal or bind fails
-		     (if (state-no-conjuncts st)
-			 st
-			 ((state-next-conjunct st) (state-less-conjunct st))
-			 )
-		     )
-                     (lambda (st) 
-                       (let ((st (state-with-scope st nonlocal-scope)))
-                         (let ((z ((reify q) st)))
-                           (cons z (lambda () (lambda () #f)))))))
+			  bind-conj ; Ensure that all delayed goals are fired before we reach the reification goal
+			  (lambda (st) 
+			    (let ((st (state-with-scope st nonlocal-scope)))
+			      (let ((z ((reify q) st)))
+				(cons z (lambda () (lambda () #f)))))))
               empty-state))))
     ((_ n (q0 q1 q ...) g0 g ...)
      (run n (x)
