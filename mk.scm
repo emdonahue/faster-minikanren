@@ -1,4 +1,5 @@
 (define always-wrap-reified? (make-parameter #f))
+(define always-fresh #f)
 
 ; Scope object.
 ; Used to determine whether a branch has occured between variable

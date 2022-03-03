@@ -422,9 +422,14 @@
            ((== a x) (== out res))
            ((== `(,a . ,res) out))))))))
 
-(test "=/=-51"
-  (run* (q) (rembero 'a '(a b a c) q))
-  '((b c) (b a c) (a b c) (a b a c)))
+; Correct up to return order
+(if always-fresh
+    (test "=/=-51"
+	  (run* (q) (rembero 'a '(a b a c) q))
+	  '((b c) (a b c) (b a c) (a b a c)))
+    (test "=/=-51"
+	  (run* (q) (rembero 'a '(a b a c) q))
+	  '((b c) (b a c) (a b c) (a b a c))))
 
 (test "=/=-52"
   (run* (q) (rembero 'a '(a b c) '(a b c)))

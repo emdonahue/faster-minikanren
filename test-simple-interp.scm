@@ -1,6 +1,6 @@
 (load "simple-interp.scm")
 
-(test "running backwards"
+#;(test "running backwards"
   (run 5 (q) (evalo q '(closure y x ((x . (closure z z ()))))))
   '(((lambda (x) (lambda (y) x)) (lambda (z) z))
     ((lambda (x) (x (lambda (y) x))) (lambda (z) z))

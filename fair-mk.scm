@@ -1,7 +1,5 @@
 (define always-wrap-reified? (make-parameter #f))
-(define (pp msg)
-  (pretty-print msg))
-(define always-fresh #t)
+(define always-fresh #f) ; Hacky debugging variable to re-use existing tests but make all the freshes fair. #t makes all freshes fair, #f makes them wh
 
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
@@ -177,24 +175,24 @@
 
 (define (state-S st) (car st))
 (define (state-C st) (cadr st))
-(trace-define (state-D st) (caddr st))
+(define (state-D st) (caddr st))
 
-(trace-define (state-with-C st C^)
+(define (state-with-C st C^)
   (state (state-S st) C^ (state-D st)))
 
-(trace-define (state-with-delayed-conjunct st d)
+(define (state-with-delayed-conjunct st d)
   (state (state-S st) (state-C st) (append (state-D st) (list d))))
 
-(trace-define (state-less-conjunct st)
+(define (state-less-conjunct st)
   (state (state-S st) (state-C st) (cdr (state-D st))))
 
-(trace-define (state-no-conjuncts st)
+(define (state-no-conjuncts st)
   (or (equal? st #f) (equal? '() (state-D st))))
 
-(trace-define (state-next-conjunct st)
+(define (state-next-conjunct st)
   (car (state-D st)))
 
-(trace-define (state-consume-conjunct st)
+(define (state-consume-conjunct st)
   ((state-next-conjunct st) (state-less-conjunct st)))
 
 (define empty-state (state empty-subst empty-C '()))
@@ -309,14 +307,14 @@
     ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
 ; SearchStream, Goal -> SearchStream
-(trace-define (bind stream g)
+(define (bind stream g)
   (case-inf stream
-    (() (begin (printf "binding #f\n") #f))
-    ((f) (begin (printf "binding suspended stream\n") (lambda () (bind (f) g))))
-    ((c) (begin (printf "binding singleton\n") (g c)))
-    ((c f) (begin (printf "binding multi stream\n") (mplus (g c) (lambda () (bind (f) g)))))))
+    (() #f)
+    ((f) (lambda () (bind (f) g)))
+    ((c) (g c))
+    ((c f) (mplus (g c) (lambda () (bind (f) g))))))
 
-(trace-define (bind-conj st)
+(define (bind-conj st)
 	      (if (state-no-conjuncts st)
 		  st
 		  (bind ((state-next-conjunct st) (state-less-conjunct st)) bind-conj)
@@ -324,14 +322,14 @@
 		     
 
 ; Int, SuspendedStream -> (ListOf SearchResult)
-(trace-define (take n f)
+(define (take n f)
   (if (and n (zero? n))
     '()
     (case-inf (f)
-      (() (begin (printf "taking empty stream\n") '()))
-      ((f) (begin (printf "taking suspended stream\n") (take n f)))
-      ((c) (begin (printf "taking singleton stream\n") (pretty-print c) (cons c '())))
-      ((c f) (begin (printf "taking answer stream\n") (pretty-print c) (cons c (take (and n (- n 1)) f)))))))
+      (() '())
+      ((f) (take n f))
+      ((c) (cons c '()))
+      ((c f) (cons c (take (and n (- n 1)) f))))))
 
 ; (bind* e:SearchStream g:Goal ...) -> SearchStream
 (define-syntax bind*
@@ -411,7 +409,7 @@
 			 ((state-next-conjunct st) (state-less-conjunct st))
 			 )
 		     )
-                     (trace-lambda reifier (st) 
+                     (lambda (st) 
                        (let ((st (state-with-scope st nonlocal-scope)))
                          (let ((z ((reify q) st)))
                            (cons z (lambda () (lambda () #f)))))))
@@ -552,7 +550,7 @@
       (and res (and-foldl proc res (cdr lst))))))
 
 (define (== u v)
-  (trace-lambda unifier (st)
+  (lambda (st)
     (let-values (((S^ added) (unify u v (state-S st))))
       (if S^
         (and-foldl update-constraints (state S^ (state-C st) (state-D st)) added)
