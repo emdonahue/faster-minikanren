@@ -181,11 +181,12 @@
 ;   C - the constraint store
 ;   D - the queue of delayed conjunctions
 
-(define (state S C D) (list S C D))
+(define-record-type state (fields (immutable s) (immutable c) (immutable d)))
+(define (state S C D) (make-state S C D))
 
-(define (state-S st) (car st))
-(define (state-C st) (cadr st))
-(define (state-D st) (caddr st))
+(define (state-S st) (state-s st))
+(define (state-C st) (state-c st))
+(define (state-D st) (state-d st))
 
 (define (state-with-C st C^)
   (state (state-S st) C^ (state-D st)))
