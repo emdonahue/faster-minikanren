@@ -1,3 +1,5 @@
+Note, this version has an implementation of the fair conjunctions described in the 2021 "Guarded Fresh Goals" paper.
+
 # miniKanren-with-symbolic-constraints
 
 A revision of https://github.com/webyrd/miniKanren-with-symbolic-constraints/ for better performance. Up to 10x faster for large queries involving heavy use of constraints.
