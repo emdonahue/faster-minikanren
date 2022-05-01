@@ -318,7 +318,7 @@
   (case-inf stream
     (() (f))
     ((f^) (lambda () (mplus (f) f^)))
-    ((c) (cons c f))
+    ((c) (if (state-has-conjuncts c) (lambda () (mplus (f) (lambda () (state-run-conjunct c)))) (cons c f))) 
     ((c f^) (cons c (lambda () (mplus (f) f^))))))
 
 ; SearchStream, Goal -> SearchStream
