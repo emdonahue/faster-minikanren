@@ -50,7 +50,7 @@
 		   (fair-fresh ()			    
 			       (diverge)
 			       (== 1 2)))))]
-	[(== q 2)]))
+	  [(== q 2)]))
       '(1 2))
 
 ; Any number of branches can diverge

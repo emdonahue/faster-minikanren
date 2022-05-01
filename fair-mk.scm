@@ -8,7 +8,7 @@
 ; To test fresh goals, toggle the always-fresh flag that turns all freshes into fair-freshes so that the old tests can be run as-is. This is a hack, but it will do the trick. Preliminary results suggest that fair freshes pass all the basic tests but are extremely slow on interpreters running backwards, which accords with my findings in the SmallTalk implementation. One area for possibly reclaiming some performance or at least some programmer flexibility (aside from the fact that you can use fair and normal fresh as much as you want in the program, so you are not giving up the ability to write eager fresh) might come from playing with the datastructure that contains the delayed conjuncts. I use a queue, because it guarantees completeness. A list might diverge, and something in between, perhaps some kind of mini miniKanren interleaving tree, could potentially have other properties that might even recover some of the bias of the eager fresh where it counts, although I haven't thought this through enough to know if that's a real possibility.
 
 (define always-wrap-reified? (make-parameter #f))
-(define always-fresh #f) ; Hacky debugging variable to re-use existing tests but make all the freshes fair. #t makes all freshes fair, #f makes them wh
+(define always-fresh #t) ; Hacky debugging variable to re-use existing tests but make all the freshes fair. #t makes all freshes fair, #f makes them wh
 
 ; Scope object.
 ; Used to determine whether a branch has occured between variable
@@ -318,8 +318,15 @@
   (case-inf stream
     (() (f))
     ((f^) (lambda () (mplus (f) f^)))
-    ((c) (if (state-has-conjuncts c) (lambda () (mplus (f) (lambda () (state-run-conjunct c)))) (cons c f))) 
-    ((c f^) (cons c (lambda () (mplus (f) f^))))))
+    ; If the state has delayed freshes, treat it as incomplete
+    ((c) (if (and #f (state-has-conjuncts c)) (lambda () (mplus (f) (lambda () (state-run-conjunct c)))) (cons c f))) 
+    ((c f^) (begin
+	      (display c)
+	      (display f^)
+	      (if (state-has-conjuncts c)
+		(lambda () (mplus (f) (lambda () (mplus f^ (lambda () (state-run-conjunct c))))))
+		(cons c (lambda () (mplus (f) f^))))))))
+					;(cons c (lambda () (mplus (f) f^)))
 
 ; SearchStream, Goal -> SearchStream
 (define (bind stream g)
