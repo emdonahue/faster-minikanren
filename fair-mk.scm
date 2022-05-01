@@ -320,12 +320,14 @@
     (() (f))
     ((f^) (lambda () (mplus (f) f^)))
     ; If the state has delayed freshes, treat it as incomplete
-    ((c) (if (and #f (state-has-conjuncts c)) (lambda () (mplus (f) (lambda () (state-run-conjunct c)))) (cons c f))) 
+    ((c) (if (and (state? c) (state-has-conjuncts c)) (lambda () (mplus (f) (lambda () (state-run-conjunct c)))) (cons c f))) 
     ((c f^) (begin
-	      (display c)
-	      (display f^)
-	      (if (state-has-conjuncts c)
-		(lambda () (mplus (f) (lambda () (mplus f^ (lambda () (state-run-conjunct c))))))
+	      ;(display c)
+	      ;(display f^)
+	      (if (and (state? c) (state-has-conjuncts c))
+		  (lambda () (mplus (f)
+				    (lambda () (mplus (state-run-conjunct c) f^))
+				    ))
 		(cons c (lambda () (mplus (f) f^))))))))
 					;(cons c (lambda () (mplus (f) f^)))
 

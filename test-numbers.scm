@@ -20,7 +20,7 @@
     ((1) (0 _.0 . _.1) (1 _.0 . _.1))
     ((1) (1 1) (0 0 1))))
 
-(test "factors"
+#;(test "factors"
   (run* (q)
     (fresh (x y)
       (*o x y (build-num 24))
@@ -224,7 +224,7 @@
             (intexp ,(build-num 1))
             (* n ((f f) (sub1 n))))))))
 
-(test "rel-fact5" 
+#;(test "rel-fact5" 
   (run* (q) (eval-expo rel-fact5 '() q))
   `((intval ,(build-num 120))))
 
